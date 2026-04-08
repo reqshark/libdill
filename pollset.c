@@ -39,3 +39,9 @@
 #else
 #include "poll.c.inc"
 #endif
+
+/* Thin public wrapper for the binding layer.
+   dill_pollset_poll() is internal — this exposes a non-blocking call. */
+int dill_pollset_poll_nonblock(void) {
+    return dill_pollset_poll(0);
+}

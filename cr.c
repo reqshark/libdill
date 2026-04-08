@@ -537,3 +537,57 @@ int dill_yield(void) {
     return dill_wait();
 }
 
+/* Non-blocking scheduler step for embedding in external event loops.
+   Polls for I/O events, fires expired timers, and resumes any ready
+   coroutines. Returns when all runnable coroutines have yielded or
+   finished. Must be called from the main coroutine context. */
+int dill_pump_step(void) {
+    struct dill_ctx_cr *ctx = &dill_getctx->cr;
+    /* Save the main coroutine context. When all runnable coroutines have
+       suspended and main is the only thing left on the ready queue,
+       dill_wait() will longjmp back here. */
+    if(dill_setjmp(ctx->r->ctx)) {
+        /* Resumed — all coroutines have yielded back. */
+        dill_slist_init(&ctx->r->clauses);
+        return 0;
+    }
+    /* Non-blocking poll for I/O events. */
+    int64_t nw = dill_now();
+    dill_pollset_poll(0);
+    /* Fire expired timers. */
+    if(!dill_rbtree_empty(&ctx->timers)) {
+        while(!dill_rbtree_empty(&ctx->timers)) {
+            struct dill_tmclause *tmcl = dill_cont(
+                dill_rbtree_first(&ctx->timers),
+                struct dill_tmclause, item);
+            if(tmcl->item.val > nw)
+                break;
+            dill_trigger(&tmcl->cl, ETIMEDOUT);
+        }
+    }
+    ctx->last_poll = nw;
+    /* If there are ready coroutines, put main on the queue and resume one.
+       The chain of dill_wait() calls will eventually return to main. */
+    if(!dill_qlist_empty(&ctx->ready)) {
+        dill_resume(ctx->r, 0, 0);
+        struct dill_slist *it = dill_qlist_pop(&ctx->ready);
+        it->next = NULL;
+        ctx->r = dill_cont(it, struct dill_cr, ready);
+        dill_longjmp(ctx->r->ctx);
+    }
+    return 0;
+}
+
+/* Returns 1 if there are active (non-main) coroutines, 0 otherwise.
+   Used by the binding layer to decide whether to keep the event loop alive. */
+int dill_have_coroutines(void) {
+    struct dill_ctx_cr *ctx = &dill_getctx->cr;
+    /* If the ready queue is non-empty, coroutines are waiting to run. */
+    if(!dill_qlist_empty(&ctx->ready))
+        return 1;
+    /* If there are timers, coroutines are sleeping. */
+    if(!dill_rbtree_empty(&ctx->timers))
+        return 1;
+    return 0;
+}
+
