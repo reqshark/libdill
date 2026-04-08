@@ -221,6 +221,48 @@ DILL_EXPORT __attribute__((noinline)) void dill_epilogue(void);
     asm(""::"r"(alloca(sizeof(size_t))));\
     asm volatile("leal (%%eax), %%esp"::"eax"(x));
 
+/* Stack-switching on ARM64 (aarch64 / Apple Silicon). */
+#elif defined(__aarch64__) && !defined DILL_ARCH_FALLBACK
+/* Context layout (8 bytes each, 104 bytes total):
+   [0]  x19  [8]  x20  [16] x21  [24] x22
+   [32] x23  [40] x24  [48] x25  [56] x26
+   [64] x27  [72] x28  [80] x29(fp) [88] x30(lr)
+   [96] sp   [104] resume address */
+#define dill_setjmp(ctx) __extension__ ({ \
+    int ret; \
+    asm volatile( \
+        "adr    x9, LJMPRET%=\n\t" \
+        "stp    x19, x20, [%1, #0]\n\t" \
+        "stp    x21, x22, [%1, #16]\n\t" \
+        "stp    x23, x24, [%1, #32]\n\t" \
+        "stp    x25, x26, [%1, #48]\n\t" \
+        "stp    x27, x28, [%1, #64]\n\t" \
+        "stp    x29, x30, [%1, #80]\n\t" \
+        "mov    x10, sp\n\t" \
+        "stp    x10, x9, [%1, #96]\n\t" \
+        "mov    %w0, wzr\n\t" \
+        "LJMPRET%=:\n\t" \
+        : "=r"(ret) \
+        : "r"(ctx) \
+        : "memory", "x9", "x10"); \
+    ret; \
+})
+#define dill_longjmp(ctx) \
+    asm volatile( \
+        "ldp    x19, x20, [%0, #0]\n\t" \
+        "ldp    x21, x22, [%0, #16]\n\t" \
+        "ldp    x23, x24, [%0, #32]\n\t" \
+        "ldp    x25, x26, [%0, #48]\n\t" \
+        "ldp    x27, x28, [%0, #64]\n\t" \
+        "ldp    x29, x30, [%0, #80]\n\t" \
+        "ldp    x9, x10, [%0, #96]\n\t" \
+        "mov    sp, x9\n\t" \
+        "mov    w0, #1\n\t" \
+        "br     x10\n\t" \
+        : : "r"(ctx) : "memory", "x9", "x10")
+#define dill_setsp(x) \
+    asm volatile("mov sp, %0" : : "r"(x) : "memory");
+
 /* Stack-switching on other microarchitectures. */
 #else
 #define dill_setjmp(ctx) sigsetjmp(ctx, 0)
