@@ -417,3 +417,15 @@ static void dill_tcp_listener_hclose(struct dill_hvfs *hvfs) {
     if(!self->mem) free(self);
 }
 
+int dill_tcp_fd(int s) {
+    struct dill_tcp_conn *self = dill_hquery(s, dill_tcp_type);
+    if(dill_slow(!self)) return -1;
+    return self->fd;
+}
+
+size_t dill_tcp_rxbuf_len(int s) {
+    struct dill_tcp_conn *self = dill_hquery(s, dill_tcp_type);
+    if(dill_slow(!self)) return 0;
+    return self->rxbuf.len - self->rxbuf.pos;
+}
+
