@@ -164,17 +164,24 @@ int dill_pollset_out(struct dill_fdclause *fdcl, int id, int fd) {
     return 0;
 }
 
-int dill_pollset_clean(int fd) {
+int dill_pollset_clean(int fd, int *triggered) {
     struct dill_ctx_pollset *ctx = &dill_getctx->pollset;
     struct dill_fdinfo *fdi = &ctx->fdinfos[fd];
+    if(triggered) *triggered = 0;
     if(!fdi->cached) return 0;
     /* Cancel any coroutines still waiting on this fd. dill_trigger calls
        dill_docancel which cancels ALL clauses on the coroutine — not just
        the fd clause but also timers, channel waits, etc. The fd cancel
        callbacks (dill_fdcancelin/out) run synchronously during this call
        and NULL the in/out pointers before we proceed to cleanup. */
-    if(fdi->in) dill_trigger(&fdi->in->cl, ECANCELED);
-    if(fdi->out) dill_trigger(&fdi->out->cl, ECANCELED);
+    if(fdi->in) {
+        dill_trigger(&fdi->in->cl, ECANCELED);
+        if(triggered) *triggered = 1;
+    }
+    if(fdi->out) {
+        dill_trigger(&fdi->out->cl, ECANCELED);
+        if(triggered) *triggered = 1;
+    }
     /* If the fd happens to still be in the pollset remove it. */
     if(fdi->idx >= 0) {
         --ctx->pollset_size;

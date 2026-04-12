@@ -80,6 +80,6 @@ int dill_fdout(int fd, int64_t deadline) {
 }
 
 int dill_fdclean(int fd) {
-    return dill_pollset_clean(fd);
+    return dill_pollset_clean(fd, NULL);
 }
 

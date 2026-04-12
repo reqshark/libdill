@@ -41,6 +41,11 @@
 #define FD_NOSIGNAL 0
 #endif
 
+/* Defined in cr.c — drives the scheduler one non-blocking step so that
+   coroutines canceled by dill_pollset_clean can unwind their stacks before
+   the caller frees the socket struct. */
+int dill_pump_step(void);
+
 int dill_ctx_fd_init(struct dill_ctx_fd *ctx) {
     ctx->count = 0;
     dill_slist_init(&ctx->cache);
@@ -391,8 +396,24 @@ next:
 }
 
 void dill_fd_close(int s) {
-    int rc = dill_fdclean(s);
+    /* Call dill_pollset_clean directly (rather than dill_fdclean) so we learn
+       whether it canceled any blocked waiters on this fd. If it did, those
+       coroutines are now on the ready queue, mid-unwind through the enclosing
+       socket struct — and the caller (e.g. dill_tcp_hclose) is about to free
+       that struct. We must drain them first. If nothing was canceled, we skip
+       the pump: running it unconditionally would do a non-blocking poll and
+       resume unrelated ready coroutines, which breaks libdill's close-then-
+       cancel-via-hclose(cr) idiom (see tests/tcp.c and tests/ipc.c). */
+    int triggered = 0;
+    int rc = dill_pollset_clean(s, &triggered);
     if(dill_slow(rc != 0)) { close(s); return; }
+    /* If dill_pollset_clean just canceled a blocked waiter on this fd, drain
+       it now — before the socket-level teardown below and before the caller
+       frees the enclosing struct. The canceled coroutine touches only struct
+       fields (not the fd), so running it ahead of close(s) is safe. We keep
+       close(s) as the final statement of this function on purpose: it reads
+       as the natural punctuation of "close the file descriptor". */
+    if(triggered) dill_pump_step();
     /* Discard any pending outbound data. If SO_LINGER option cannot
        be set, never mind and continue anyway. */
     struct linger lng;

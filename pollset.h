@@ -50,8 +50,12 @@ int dill_pollset_in(struct dill_fdclause *fdcl, int id, int fd);
 /* Add waiting for an out event on the fd to the list of current clauses. */
 int dill_pollset_out(struct dill_fdclause *fdcl, int id, int fd);
 
-/* Drop any cached info about the file descriptor. */
-int dill_pollset_clean(int fd);
+/* Drop any cached info about the file descriptor. If 'triggered' is non-NULL,
+   it is set to 1 when the call canceled (dill_trigger'd) at least one waiting
+   coroutine, 0 otherwise. Callers that need to flush those canceled coroutines
+   before freeing the underlying socket struct can use this to gate a
+   dill_pump_step() call. */
+int dill_pollset_clean(int fd, int *triggered);
 
 /* Wait for events. 'timeout' is in milliseconds. Return 0 if the timeout expired or
   1 if at least one clause was triggered. */
