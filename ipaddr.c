@@ -23,7 +23,9 @@
 */
 
 #if defined __linux__
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <netdb.h>
 #include <sys/eventfd.h>
 #endif
@@ -331,8 +333,9 @@ int dill_ipaddr_remotes(struct dill_ipaddr *addrs, int naddrs,
         dill_assert(dill_dns_hints);
     }
     /* Launch the actual DNS query. */
+    struct dns_options dopts = { DNS_OPTS_INITIALIZER_ };
     struct dns_resolver *resolver = dns_res_open(dill_dns_conf,
-        dill_dns_hosts, dill_dns_hints, NULL, dns_opts(), &rc);
+        dill_dns_hosts, dill_dns_hints, NULL, &dopts, &rc);
     if(!resolver) {
         if(errno == ENFILE || errno == EMFILE) {
             return -1;
